@@ -153,41 +153,13 @@ func JoinURL(base, path string) string {
 		return base
 	}
 
-	// Handle absolute URLs
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-
-	// Parse base URL
-	parsed, err := url.Parse(base)
+	parsedBase, err := url.Parse(base)
 	if err != nil {
 		return base + "/" + strings.TrimPrefix(path, "/")
 	}
-
-	// Handle protocol-relative URLs
-	if strings.HasPrefix(path, "//") {
-		return parsed.Scheme + ":" + path
+	parsedPath, err := url.Parse(path)
+	if err != nil {
+		return base + "/" + strings.TrimPrefix(path, "/")
 	}
-
-	// Handle root-relative URLs
-	if strings.HasPrefix(path, "/") {
-		parsed.Path = path
-		parsed.RawQuery = ""
-		return parsed.String()
-	}
-
-	// Handle relative URLs
-	if !strings.HasSuffix(parsed.Path, "/") {
-		// Remove last path segment
-		lastSlash := strings.LastIndex(parsed.Path, "/")
-		if lastSlash >= 0 {
-			parsed.Path = parsed.Path[:lastSlash+1]
-		} else {
-			parsed.Path = "/"
-		}
-	}
-	parsed.Path += path
-	parsed.RawQuery = ""
-
-	return parsed.String()
+	return parsedBase.ResolveReference(parsedPath).String()
 }
