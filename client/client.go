@@ -1115,7 +1115,7 @@ func (c *Client) doOnce(ctx context.Context, req *Request, redirectHistory []*Re
 		}
 	case ProtocolHTTP2:
 		// Force HTTP/2 only
-		resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime)
+		resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1142,7 +1142,7 @@ func (c *Client) doOnce(ctx context.Context, req *Request, redirectHistory []*Re
 				c.markH3Failed(hostKey)
 				// HTTP/3 failed, try HTTP/2
 				resetRequestBody(httpReq, bodyBytes)
-				resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime)
+				resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime, true)
 				if err != nil {
 					// Both failed, try HTTP/1.1
 					resetRequestBody(httpReq, bodyBytes)
@@ -1154,7 +1154,7 @@ func (c *Client) doOnce(ctx context.Context, req *Request, redirectHistory []*Re
 			}
 		} else {
 			// Try HTTP/2 first (for bot protection cookie flow)
-			resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime)
+			resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime, true)
 			if err != nil {
 				// HTTP/2 failed, try HTTP/3 if available
 				if useH3 {
@@ -1534,13 +1534,15 @@ func (c *Client) doHTTP3(ctx context.Context, host, port string, httpReq *http.R
 	return resp, "h3", nil
 }
 
-// doHTTP2 executes the request over HTTP/2
-func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.Request, timing *protocol.Timing, startTime time.Time) (*http.Response, string, error) {
+// doHTTP2 executes the request over HTTP/2. With allowH1, a server that
+// declines h2 in ALPN is answered in HTTP/1.1 on the connection it accepted,
+// as Chrome does; forced HTTP/2 passes false so the mismatch still surfaces.
+func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.Request, timing *protocol.Timing, startTime time.Time, allowH1 bool) (*http.Response, string, error) {
 	connStart := time.Now()
 
 	conn, err := c.poolManager.GetConn(ctx, host, port)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get connection: %w", err)
+		return c.h2ConnFailed(host, port, httpReq, timing, err, allowH1)
 	}
 
 	// Calculate timing. Uses(), not conn.UseCount: the pool bumps that counter
@@ -1565,7 +1567,7 @@ func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.R
 		// never loops. (Retry borrowed from PR #84.)
 		conn, err = c.poolManager.GetConn(ctx, host, port)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to get connection: %w", err)
+			return c.h2ConnFailed(host, port, httpReq, timing, err, allowH1)
 		}
 		resp, err = conn.RoundTrip(httpReq)
 	}
@@ -1575,6 +1577,25 @@ func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.R
 
 	timing.FirstByte = float64(time.Since(firstByteTime).Milliseconds())
 	return resp, "h2", nil
+}
+
+func (c *Client) h2ConnFailed(host, port string, httpReq *http.Request, timing *protocol.Timing, err error, allowH1 bool) (*http.Response, string, error) {
+	var alpnErr *transport.ALPNMismatchError
+	if !errors.As(err, &alpnErr) {
+		return nil, "", fmt.Errorf("failed to get connection: %w", err)
+	}
+	if !allowH1 {
+		alpnErr.TLSConn.Close()
+		return nil, "", fmt.Errorf("failed to get connection: %w", err)
+	}
+	c.markH2Failed(host + ":" + port)
+	firstByteTime := time.Now()
+	resp, err := c.h1Transport.RoundTripWithTLSConn(httpReq, alpnErr.TLSConn, alpnErr.Host, alpnErr.Port)
+	if err != nil {
+		return nil, "", fmt.Errorf("HTTP/1.1 request failed: %w", err)
+	}
+	timing.FirstByte = float64(time.Since(firstByteTime).Milliseconds())
+	return resp, "h1", nil
 }
 
 // doHTTP1 performs HTTP/1.1 request using the h1Transport

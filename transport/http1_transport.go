@@ -402,7 +402,8 @@ func (t *HTTP1Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 // RoundTripWithTLSConn performs an HTTP/1.1 request using an existing TLS connection.
 // This is used when ALPN negotiation results in HTTP/1.1 instead of HTTP/2,
 // allowing the TLS connection to be reused instead of creating a new one.
-// The connection will be closed after the request (not pooled) since it came from H2 transport.
+// The connection then joins the idle pool, so later requests to the host keep
+// the browser's own ClientHello rather than dialling with http/1.1-only ALPN.
 func (t *HTTP1Transport) RoundTripWithTLSConn(req *http.Request, tlsConn *utls.UConn, host, port string) (*http.Response, error) {
 	t.closedMu.RLock()
 	if t.closed {
@@ -445,10 +446,12 @@ func (t *HTTP1Transport) RoundTripWithTLSConn(req *http.Request, tlsConn *utls.U
 		return nil, WrapError("request", host, port, "h1", err)
 	}
 
-	// Wrap the body to close connection when done (not pooled since it came from H2 attempt)
-	resp.Body = &streamBodyWrapper{
+	resp.Body = &pooledBodyWrapper{
 		body:      resp.Body,
 		conn:      conn,
+		key:       fmt.Sprintf("%s://%s:%s", req.URL.Scheme, t.getConnectHost(req.URL.Hostname()), port),
+		transport: t,
+		keepAlive: t.shouldKeepAlive(req, resp),
 		stopWatch: stopWatch,
 		ctx:       req.Context(),
 	}

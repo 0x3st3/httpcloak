@@ -723,6 +723,19 @@ func (p *HostPool) createConn(ctx context.Context) (*Conn, error) {
 		return nil, fmt.Errorf("TLS handshake failed: %w", err)
 	}
 
+	// Checked before NewClientConn, which writes the h2 preface at once: a
+	// server that declined h2 answers that preface with an HTTP/1.1 error page.
+	// The connection is handed back open so the caller can speak HTTP/1.1 on it.
+	if negotiated := tlsConn.ConnectionState().NegotiatedProtocol; negotiated != "h2" {
+		return nil, &transport.ALPNMismatchError{
+			Expected:   "h2",
+			Negotiated: negotiated,
+			TLSConn:    tlsConn,
+			Host:       p.sniHost,
+			Port:       p.port,
+		}
+	}
+
 	// One builder for both entrypoints. This literal and the one in
 	// transport/http2_transport.go used to be maintained separately and had
 	// drifted: this side set no HeaderPriorityFunc, so a Session never emitted

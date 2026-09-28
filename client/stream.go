@@ -212,7 +212,7 @@ func (c *Client) DoStream(ctx context.Context, req *Request) (*StreamResponse, e
 			return nil, fmt.Errorf("HTTP/3 failed: %w", err)
 		}
 	case ProtocolHTTP2:
-		resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime)
+		resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime, false)
 		if err != nil {
 			cancel()
 			return nil, err
@@ -224,25 +224,20 @@ func (c *Client) DoStream(ctx context.Context, req *Request) (*StreamResponse, e
 			return nil, fmt.Errorf("HTTP/1.1 failed: %w", err)
 		}
 	default:
-		// Auto mode: try H3 -> H2 -> H1 with fallback
-		if useH3 {
+		// Auto mode: H1 for hosts known to decline h2, else H3 -> H2, where H2
+		// answers in HTTP/1.1 on the same connection if ALPN declines h2.
+		if c.shouldUseH1(hostKey) {
+			resp, usedProtocol, err = c.doHTTP1(ctx, host, port, httpReq, timing, startTime)
+		} else if useH3 {
 			resp, usedProtocol, err = c.doHTTP3(ctx, host, port, httpReq, timing, startTime)
 			if err != nil {
 				c.markH3Failed(hostKey)
 				resetRequestBody(httpReq, bodyBytes)
 
-				resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime)
+				resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime, true)
 			}
 		} else {
-			resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime)
-		}
-
-		// If H2 failed and we should try H1, attempt fallback
-		if err != nil && c.shouldUseH1(hostKey) {
-			c.markH2Failed(hostKey)
-			resetRequestBody(httpReq, bodyBytes)
-
-			resp, usedProtocol, err = c.doHTTP1(ctx, host, port, httpReq, timing, startTime)
+			resp, usedProtocol, err = c.doHTTP2(ctx, host, port, httpReq, timing, startTime, true)
 		}
 
 		if err != nil {
