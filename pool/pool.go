@@ -568,6 +568,7 @@ func (p *HostPool) GetConn(ctx context.Context) (*Conn, error) {
 	p.mu.Lock()
 	p.connections = append(p.connections, conn)
 	p.mu.Unlock()
+	conn.MarkUsed()
 
 	return conn, nil
 }

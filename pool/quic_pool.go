@@ -470,6 +470,7 @@ func (p *QUICHostPool) GetConn(ctx context.Context) (*QUICConn, error) {
 	p.mu.Lock()
 	p.connections = append(p.connections, conn)
 	p.mu.Unlock()
+	conn.MarkUsed()
 
 	return conn, nil
 }

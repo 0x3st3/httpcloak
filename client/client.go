@@ -1542,7 +1542,7 @@ func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.R
 
 	conn, err := c.poolManager.GetConn(ctx, host, port)
 	if err != nil {
-		return c.h2ConnFailed(host, port, httpReq, timing, err, allowH1)
+		return c.h2ConnFailed(host, port, httpReq, timing, connStart, err, allowH1)
 	}
 
 	// Calculate timing. Uses(), not conn.UseCount: the pool bumps that counter
@@ -1567,7 +1567,7 @@ func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.R
 		// never loops. (Retry borrowed from PR #84.)
 		conn, err = c.poolManager.GetConn(ctx, host, port)
 		if err != nil {
-			return c.h2ConnFailed(host, port, httpReq, timing, err, allowH1)
+			return c.h2ConnFailed(host, port, httpReq, timing, connStart, err, allowH1)
 		}
 		resp, err = conn.RoundTrip(httpReq)
 	}
@@ -1579,7 +1579,7 @@ func (c *Client) doHTTP2(ctx context.Context, host, port string, httpReq *http.R
 	return resp, "h2", nil
 }
 
-func (c *Client) h2ConnFailed(host, port string, httpReq *http.Request, timing *protocol.Timing, err error, allowH1 bool) (*http.Response, string, error) {
+func (c *Client) h2ConnFailed(host, port string, httpReq *http.Request, timing *protocol.Timing, connStart time.Time, err error, allowH1 bool) (*http.Response, string, error) {
 	var alpnErr *transport.ALPNMismatchError
 	if !errors.As(err, &alpnErr) {
 		return nil, "", fmt.Errorf("failed to get connection: %w", err)
@@ -1589,6 +1589,7 @@ func (c *Client) h2ConnFailed(host, port string, httpReq *http.Request, timing *
 		return nil, "", fmt.Errorf("failed to get connection: %w", err)
 	}
 	c.markH2Failed(host + ":" + port)
+	timing.Connect = float64(time.Since(connStart).Milliseconds())
 	firstByteTime := time.Now()
 	resp, err := c.h1Transport.RoundTripWithTLSConn(httpReq, alpnErr.TLSConn, alpnErr.Host, alpnErr.Port)
 	if err != nil {
