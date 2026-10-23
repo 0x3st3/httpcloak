@@ -246,6 +246,14 @@ func (c *Client) DoStream(ctx context.Context, req *Request) (*StreamResponse, e
 		}
 	}
 
+	if c.certPinner != nil && c.certPinner.HasPins() && resp.TLS != nil {
+		if err := c.certPinner.Verify(host, resp.TLS.PeerCertificates); err != nil {
+			resp.Body.Close()
+			cancel()
+			return nil, err
+		}
+	}
+
 	// Build response headers map (multi-value support)
 	headers := make(map[string][]string)
 	for key, values := range resp.Header {

@@ -1129,6 +1129,10 @@ func (t *HTTP1Transport) doRequest(conn *http1Conn, req *http.Request) (*http.Re
 		return nil, err
 	}
 	stashHeaderCasing(resp.Header, casing)
+	if conn.tlsConn != nil {
+		state := conn.tlsConn.ConnectionState()
+		resp.TLS = &state
+	}
 
 	return resp, nil
 }
