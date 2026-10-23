@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -284,7 +283,7 @@ func decompressHTTP3(data []byte, encoding string) ([]byte, error) {
 		return io.ReadAll(decoder)
 
 	case "deflate":
-		reader := flate.NewReader(bytes.NewReader(data))
+		reader, _ := newDeflateReader(bytes.NewReader(data))
 		defer reader.Close()
 		return io.ReadAll(reader)
 

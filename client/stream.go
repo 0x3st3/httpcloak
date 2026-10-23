@@ -3,9 +3,7 @@ package client
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"fmt"
 	"io"
@@ -315,23 +313,6 @@ func setupDecompressor(body io.ReadCloser, encoding string) (io.ReadCloser, io.C
 	default:
 		return body, nil
 	}
-}
-
-// Servers send "deflate" both zlib-wrapped (RFC 9110) and raw, so the zlib header decides.
-func newDeflateReader(body io.Reader) (io.ReadCloser, io.Closer) {
-	buffered := bufio.NewReader(body)
-	if header, err := buffered.Peek(2); err == nil && isZlibHeader(header) {
-		reader, err := zlib.NewReader(buffered)
-		if err == nil {
-			return reader, reader
-		}
-	}
-	reader := flate.NewReader(buffered)
-	return reader, reader
-}
-
-func isZlibHeader(header []byte) bool {
-	return header[0]&0x0f == 8 && (uint16(header[0])<<8|uint16(header[1]))%31 == 0
 }
 
 // brotliReadCloser wraps brotli.Reader to implement io.ReadCloser

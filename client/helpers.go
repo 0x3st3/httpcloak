@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"fmt"
 	"io"
@@ -155,7 +157,7 @@ func Decompress(data []byte, encoding string) ([]byte, error) {
 		return io.ReadAll(decoder)
 
 	case "deflate":
-		reader := flate.NewReader(bytes.NewReader(data))
+		reader, _ := newDeflateReader(bytes.NewReader(data))
 		defer reader.Close()
 		return io.ReadAll(reader)
 
@@ -349,4 +351,25 @@ func resetRequestBody(httpReq *http.Request, body []byte) {
 		// POST/PUT/PATCH with empty body - still need a valid (empty) reader
 		httpReq.Body = io.NopCloser(bytes.NewReader([]byte{}))
 	}
+}
+
+// Servers send "deflate" both zlib-wrapped (RFC 9110) and raw, so the zlib header
+// decides. A body too short to hold either (HEAD, 204, 304) passes through.
+func newDeflateReader(body io.Reader) (io.ReadCloser, io.Closer) {
+	buffered := bufio.NewReader(body)
+	header, err := buffered.Peek(2)
+	if err != nil {
+		return io.NopCloser(buffered), nil
+	}
+	if isZlibHeader(header) {
+		if reader, err := zlib.NewReader(buffered); err == nil {
+			return reader, reader
+		}
+	}
+	reader := flate.NewReader(buffered)
+	return reader, reader
+}
+
+func isZlibHeader(header []byte) bool {
+	return header[0]&0x0f == 8 && (uint16(header[0])<<8|uint16(header[1]))%31 == 0
 }
