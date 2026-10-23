@@ -224,7 +224,7 @@ func NewSessionWithOptions(id string, config *protocol.SessionConfig, opts *Sess
 	} else if config.ForceHTTP3 {
 		t.SetProtocol(transport.ProtocolHTTP3)
 	} else if config.DisableHTTP3 {
-		t.SetProtocol(transport.ProtocolHTTP2)
+		t.SetDisableHTTP3(true)
 	}
 
 	// Set IPv4 preference

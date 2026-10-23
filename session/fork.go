@@ -94,7 +94,7 @@ func (s *Session) forkOne() *Session {
 	} else if cfgCopy.ForceHTTP3 {
 		t.SetProtocol(transport.ProtocolHTTP3)
 	} else if cfgCopy.DisableHTTP3 {
-		t.SetProtocol(transport.ProtocolHTTP2)
+		t.SetDisableHTTP3(true)
 	}
 
 	if cfgCopy.PreferIPv4 {

@@ -180,6 +180,9 @@ func (t *Transport) DoStream(ctx context.Context, req *Request) (*StreamResponse
 		}
 		if SupportsQUIC(udpEffectiveProxyURL) {
 			if tcpBlocked != nil {
+				if snap.h3 == nil {
+					return nil, tcpBlocked
+				}
 				// UDP-only proxy (MASQUE): only H3 can reach the target. Racing
 				// would fire an H2 probe that dials direct and leaks the real
 				// IP + SNI, so stream over H3 with no TCP fallback.

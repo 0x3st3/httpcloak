@@ -597,6 +597,7 @@ type Transport struct {
 	preset      *fingerprint.Preset
 	timeout     time.Duration
 	protocol    Protocol
+	disableH3   bool
 	proxy       *ProxyConfig
 	config      *TransportConfig
 
@@ -878,6 +879,13 @@ func NewTransportWithConfig(presetName string, proxy *ProxyConfig, config *Trans
 func (t *Transport) SetProtocol(p Protocol) {
 	t.fieldsMu.Lock()
 	t.protocol = p
+	t.fieldsMu.Unlock()
+}
+
+// SetDisableHTTP3 keeps auto negotiation (H2 with an H1 fallback) but never uses H3.
+func (t *Transport) SetDisableHTTP3(disable bool) {
+	t.fieldsMu.Lock()
+	t.disableH3 = disable
 	t.fieldsMu.Unlock()
 }
 
@@ -1359,10 +1367,14 @@ type transportSnapshot struct {
 func (t *Transport) snapshot() transportSnapshot {
 	t.fieldsMu.RLock()
 	defer t.fieldsMu.RUnlock()
+	h3 := t.h3Transport
+	if t.disableH3 {
+		h3 = nil
+	}
 	return transportSnapshot{
 		h1:            t.h1Transport,
 		h2:            t.h2Transport,
-		h3:            t.h3Transport,
+		h3:            h3,
 		proxy:         t.proxy,
 		preset:        t.preset,
 		protocol:      t.protocol,
@@ -1481,6 +1493,9 @@ func (t *Transport) Do(ctx context.Context, req *Request) (*Response, error) {
 
 			if SupportsQUIC(udpEffectiveProxyURL) {
 				if tcpBlocked != nil {
+					if snap.h3 == nil {
+						return nil, tcpBlocked
+					}
 					// UDP-only proxy (MASQUE): only H3 can reach the target. Racing
 					// would fire an H2 probe that dials direct and leaks the real
 					// IP + SNI, so go straight to H3 with no TCP fallback.
